@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: C/C++ (MSBuild) CI
 
 on:
   push:
@@ -8,16 +8,19 @@ on:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v4
-    - name: configure
-      run: ./configure
-    - name: make
-      run: make
-    - name: make check
-      run: make check
-    - name: make distcheck
-      run: make distcheck
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
+
+    - name: Restore NuGet packages
+      run: nuget restore StellaSora-Tool.sln
+
+    - name: Build solution
+      run: msbuild StellaSora-Tool.sln /p:Configuration=Release /p:Platform=x64
