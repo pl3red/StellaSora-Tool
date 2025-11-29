@@ -2,43 +2,42 @@
 #include "main.h"
 #include <process.h>   // for _beginthreadex
 
-// Wrapper thread for safety
+// Thread start procedure
 unsigned __stdcall ThreadEntry(void* param)
 {
-    HMODULE hModule = (HMODULE)param;
+    HMODULE* mod = reinterpret_cast<HMODULE*>(param);
 
-    // Start your mod
-    Run(hModule);
+    Run(mod);
 
+    delete mod; // free allocated pointer
     return 0;
 }
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 {
-    switch (ul_reason_for_call)
+    switch (reason)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
-        
-        // Use _beginthreadex (SAFE inside DllMain)
+
+        // Allocate a pointer because Run(HMODULE*) requires it
         {
+            HMODULE* modPtr = new HMODULE(hModule);
+
             uintptr_t thread = _beginthreadex(
-                nullptr,        // default security
-                0,              // default stack
-                ThreadEntry,    // entry function
-                hModule,        // pass REAL module handle
+                nullptr,
+                0,
+                ThreadEntry,      // Start routine
+                modPtr,           // Pass pointer version of hModule
                 0,
                 nullptr
             );
 
             if (thread)
                 CloseHandle((HANDLE)thread);
+            else
+                delete modPtr;  // prevent memory leak if thread fails
         }
-        break;
-
-    case DLL_THREAD_ATTACH:
-    case DLL_THREAD_DETACH:
-        // should never arrive because of DisableThreadLibraryCalls
         break;
 
     case DLL_PROCESS_DETACH:
