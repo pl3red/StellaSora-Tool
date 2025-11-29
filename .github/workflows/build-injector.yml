@@ -11,8 +11,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
@@ -20,48 +19,20 @@ jobs:
     - name: Setup NuGet
       uses: NuGet/setup-nuget@v2
 
-    - name: Restore NuGet packages
+    - name: Restore NuGet
       run: nuget restore StellaSora-Tool.sln
 
-    # Build main DLL project
-    - name: Build StellaSora DLL (Release x64)
+    - name: Build DLL
       run: msbuild StellaSora-Tool.sln /p:Configuration=Release /p:Platform=x64 /m
 
-    # Build injector project (Release x64)
-    - name: Build Injector EXE (Release x64)
+    - name: Build Injector
       run: msbuild injector/Injector.vcxproj /p:Configuration=Release /p:Platform=x64 /m
 
-    # List entire file structure for debugging
-    - name: Directory listing (all files)
-      shell: cmd
-      run: |
-        echo === FILE LIST: dir /a-d /b /s ===
-        dir /a-d /b /s
-
-    # Show output artifacts
-    - name: Show build outputs
-      shell: cmd
-      run: |
-        echo === DLL Output ===
-        dir /s /b *.dll
-        echo.
-        echo === EXE Output (Injector) ===
-        dir /s /b *.exe
-        echo.
-        echo === LIB Output ===
-        dir /s /b *.lib
-        echo.
-        echo === PDB Output ===
-        dir /s /b *.pdb
-
-    # Upload artifacts: DLL + injector EXE + symbols
-    - name: Upload compiled artifacts
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: StellaSora-injector-build
+        name: StellaSora-Tool-Release
         path: |
-          **\*.dll
-          **\*.exe
-          **\*.pdb
-          **\*.lib
-        retention-days: 30
+          **/StellaSora-Tool.dll
+          **/StellaSora-Tool.pdb
+          **/Injector.exe
