@@ -1,63 +1,109 @@
-name: Build StellaSora DLL
+#include <windows.h>
+#include <tlhelp32.h>
+#include <string>
+#include <iostream>
 
-on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
+bool InjectDLL(DWORD processId, const std::string& dllPath)
+{
+    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
+    if (!hProcess) {
+        std::cout << "Failed to open target process. Error: " << GetLastError() << "\n";
+        return false;
+    }
 
-jobs:
-  build:
-    runs-on: windows-latest
+    LPVOID allocMem = VirtualAllocEx(
+        hProcess,
+        NULL,
+        dllPath.size() + 1,
+        MEM_RESERVE | MEM_COMMIT,
+        PAGE_READWRITE
+    );
 
-    steps:
-    # Checkout repo
-    - name: Checkout
-      uses: actions/checkout@v4
+    if (!allocMem) {
+        std::cout << "Failed to allocate memory in target process.\n";
+        CloseHandle(hProcess);
+        return false;
+    }
 
-    # Install MSBuild
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
+    if (!WriteProcessMemory(hProcess, allocMem, dllPath.c_str(), dllPath.size() + 1, NULL)) {
+        std::cout << "WriteProcessMemory failed.\n";
+        VirtualFreeEx(hProcess, allocMem, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return false;
+    }
 
-    # Setup NuGet (required by Visual Studio solutions)
-    - name: Setup NuGet
-      uses: NuGet/setup-nuget@v2
+    HANDLE hThread = CreateRemoteThread(
+        hProcess,
+        NULL,
+        0,
+        (LPTHREAD_START_ROUTINE)LoadLibraryA,
+        allocMem,
+        0,
+        NULL
+    );
 
-    # Restore packages (even if none is needed)
-    - name: Restore NuGet packages
-      run: nuget restore StellaSora-Tool.sln
+    if (!hThread) {
+        std::cout << "CreateRemoteThread failed.\n";
+        VirtualFreeEx(hProcess, allocMem, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return false;
+    }
 
-    # Build the solution in Release | x64
-    - name: Build DLL (Release x64)
-      run: msbuild StellaSora-Tool.sln /p:Configuration=Release /p:Platform=x64 /m
+    WaitForSingleObject(hThread, INFINITE);
 
-    # List all files, exactly like: dir /a-d /b /s
-    - name: List all files (debugging)
-      shell: cmd
-      run: |
-        echo === DIRECTORY LIST (dir /a-d /b /s) ===
-        dir /a-d /b /s
+    VirtualFreeEx(hProcess, allocMem, 0, MEM_RELEASE);
+    CloseHandle(hThread);
+    CloseHandle(hProcess);
 
-    # Find DLL, LIB, PDB output automatically
-    - name: Show build outputs
-      shell: cmd
-      run: |
-        echo === DLL Files ===
-        dir /s /b *.dll
-        echo.
-        echo === PDB Files ===
-        dir /s /b *.pdb
-        echo.
-        echo === LIB Files ===
-        dir /s /b *.lib
+    return true;
+}
 
-    # Upload all DLL artifacts
-    - name: Upload built artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: StellaSora-Release-x64
-        path: |
-          **\*.dll
-          **\*.pdb
-          **\*.lib
-        retention-days: 30
+DWORD GetProcessIdByName(const std::string& processName)
+{
+    PROCESSENTRY32 entry;
+    entry.dwSize = sizeof(PROCESSENTRY32);
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+    if (Process32First(snapshot, &entry)) {
+        do {
+            if (!_stricmp(entry.szExeFile, processName.c_str())) {
+                CloseHandle(snapshot);
+                return entry.th32ProcessID;
+            }
+        } while (Process32Next(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+    return 0;
+}
+
+int main()
+{
+    std::string processName;
+    std::string dllName = "StellaSora-Tool.dll";
+
+    std::cout << "Target process name (example: Game.exe): ";
+    std::getline(std::cin, processName);
+
+    DWORD pid = GetProcessIdByName(processName);
+
+    if (pid == 0) {
+        std::cout << "Process not found.\n";
+        return 1;
+    }
+
+    char fullDllPath[MAX_PATH];
+    GetFullPathNameA(dllName.c_str(), MAX_PATH, fullDllPath, nullptr);
+
+    std::cout << "Injecting: " << fullDllPath << "\n";
+
+    if (InjectDLL(pid, fullDllPath)) {
+        std::cout << "Injection successful.\n";
+    } else {
+        std::cout << "Injection failed.\n";
+    }
+
+    system("pause");
+    return 0;
+}
